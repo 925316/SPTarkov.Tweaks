@@ -1,0 +1,5 @@
+{
+  "EnableAmmoLoadTweaks": true,
+  "RaidTimeMinutes": 120,
+  "AmmoStackMultiplier": 6
+}
