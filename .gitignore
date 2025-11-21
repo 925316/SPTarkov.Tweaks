@@ -13,8 +13,10 @@ cmake-build-relwithdebinfo-visual-studio/*
 *.exe
 
 # output directory
-build/
+Build
+Build/Intermediate
 out/
+Bela/obj
 __pycache__/
 
 # precompiled headers
