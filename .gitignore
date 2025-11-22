@@ -16,7 +16,7 @@ cmake-build-relwithdebinfo-visual-studio/*
 Build
 Build/Intermediate
 out/
-Bela/obj
+Bela.Tweaks/obj
 __pycache__/
 
 # precompiled headers
