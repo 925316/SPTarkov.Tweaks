@@ -25,7 +25,7 @@ public record ModMetadata : AbstractModMetadata
     public override string Name { get; init; } = "Tweaks";
     public override string Author { get; init; } = "Bela";
     public override List<string>? Contributors { get; init; }
-    public override SemanticVersioning.Version Version { get; init; } = new("1.2.1");
+    public override SemanticVersioning.Version Version { get; init; } = new("1.2.2");
     public override SemanticVersioning.Range SptVersion { get; init; } = new("~4.0.0");
     public override List<string>? Incompatibilities { get; init; }
     public override Dictionary<string, SemanticVersioning.Range>? ModDependencies { get; init; }
@@ -86,48 +86,51 @@ public class Main(
         var items = databaseService.GetItems();
         var ragfairSettings = globals.Configuration.RagFair;
 
-        m_coreConfig.Fixes.RemoveModItemsFromProfile = config.RemoveModItemsFromProfile;
-        m_coreConfig.Fixes.RemoveInvalidTradersFromProfile = config.RemoveInvalidTradersFromProfile;
-        m_coreConfig.Fixes.FixProfileBreakingInventoryItemIssues = config.FixProfileBreakingInventoryItemIssues;
-
-        logger.Warning($"[Bela Tweaks]: RemoveModItemsFromProfile = {m_coreConfig.Fixes.RemoveModItemsFromProfile}, " +
-                       $"RemoveInvalidTradersFromProfile = {m_coreConfig.Fixes.RemoveInvalidTradersFromProfile}, " +
-                       $"FixProfileBreakingInventoryItemIssues = {m_coreConfig.Fixes.FixProfileBreakingInventoryItemIssues}");
-
-        if (config.EnableAmmoLoadTweaks)
+        if (config.CoreFixes.Enabled)
         {
-            globals.Configuration.BaseLoadTime = config.BaseLoadTime;
-            globals.Configuration.BaseUnloadTime = config.BaseUnLoadTime;
-            logger.Info($"[Bela Tweaks]: BaseLoadTime = {config.BaseLoadTime} seconds, BaseUnloadTime = {config.BaseUnLoadTime} seconds");
+            m_coreConfig.Fixes.RemoveModItemsFromProfile = config.CoreFixes.RemoveModItemsFromProfile;
+            m_coreConfig.Fixes.RemoveInvalidTradersFromProfile = config.CoreFixes.RemoveInvalidTradersFromProfile;
+            m_coreConfig.Fixes.FixProfileBreakingInventoryItemIssues = config.CoreFixes.FixProfileBreakingInventoryItemIssues;
+
+            logger.Warning($"[Bela Tweaks]: RemoveModItemsFromProfile = {m_coreConfig.Fixes.RemoveModItemsFromProfile}, " +
+                           $"RemoveInvalidTradersFromProfile = {m_coreConfig.Fixes.RemoveInvalidTradersFromProfile}, " +
+                           $"FixProfileBreakingInventoryItemIssues = {m_coreConfig.Fixes.FixProfileBreakingInventoryItemIssues}");
         }
 
-        foreach (var kvp in locations.GetAllPropertiesAsDictionary())
+        if (config.AmmoTweaks.Enabled)
         {
-            if (kvp.Value is Location location && location.Base != null)
+            globals.Configuration.BaseLoadTime = config.AmmoTweaks.BaseLoadTime;
+            globals.Configuration.BaseUnloadTime = config.AmmoTweaks.BaseUnLoadTime;
+            logger.Info($"[Bela Tweaks]: BaseLoadTime = {config.AmmoTweaks.BaseLoadTime} seconds, BaseUnloadTime = {config.AmmoTweaks.BaseUnLoadTime} seconds");
+        }
+
+        if (config.RaidTweaks.Enabled)
+        {
+            foreach (var kvp in locations.GetAllPropertiesAsDictionary())
             {
-                location.Base.ExitAccessTime = config.RaidTimeMinutes;
-                location.Base.EscapeTimeLimit = config.RaidTimeMinutes;
-                location.Base.EscapeTimeLimitCoop = config.RaidTimeMinutes;
-                location.Base.EscapeTimeLimitPVE = config.RaidTimeMinutes;
-                logger.Info($"[Bela Tweaks]: {location.Base.Id} EscapeTimeLimit set to {config.RaidTimeMinutes}");
+                if (kvp.Value is Location location && location.Base != null)
+                {
+                    location.Base.ExitAccessTime = config.RaidTweaks.RaidTimeMinutes;
+                    location.Base.EscapeTimeLimit = config.RaidTweaks.RaidTimeMinutes;
+                    location.Base.EscapeTimeLimitCoop = config.RaidTweaks.RaidTimeMinutes;
+                    location.Base.EscapeTimeLimitPVE = config.RaidTweaks.RaidTimeMinutes;
+                }
             }
+            logger.Info($"[Bela Tweaks]: All locations EscapeTimeLimit set to {config.RaidTweaks.RaidTimeMinutes} minutes");
         }
 
-        foreach (var kvp in items)
+        if (config.AmmoTweaks.Enabled)
         {
-            var item = kvp.Value;
-            if (config.AmmoStackMultiplier > 1 && item.Parent.ToString() == m_ammoParentId)
+            foreach (var kvp in items)
             {
-                item.Properties.StackMaxSize *= config.AmmoStackMultiplier;
+                var item = kvp.Value;
+                if (config.AmmoTweaks.AmmoStackMultiplier > 1 && item.Parent.ToString() == m_ammoParentId)
+                {
+                    item.Properties.StackMaxSize *= config.AmmoTweaks.AmmoStackMultiplier;
+                }
             }
+            logger.Info($"[Bela Tweaks]: The bullet stack has been adjusted by {config.AmmoTweaks.AmmoStackMultiplier} times");
         }
-
-        if (config.AmmoStackMultiplier > 1)
-        {
-            logger.Info($"[Bela Tweaks]: The bullet stack has been adjusted by {config.AmmoStackMultiplier} times");
-        }
-
-        logger.Success("[Bela Tweaks]: Done!");
 
         return Task.CompletedTask;
     }
@@ -135,29 +138,41 @@ public class Main(
     public static void WriteDefaultConfigWithComments(string configPath)
     {
         var jsonc = @"{
-  // Whether to remove items added by Mods from the player profile
-  ""RemoveModItemsFromProfile"": false,
+  ""CoreFixes"": {
+    // Whether to enable Core fixes category
+    ""Enabled"": true,
 
-  // Whether to remove invalid trader data to prevent save corruption
-  ""RemoveInvalidTradersFromProfile"": false,
+    // Default false, Whether to remove items added by Mods from the player profile
+    ""RemoveModItemsFromProfile"": false,
 
-  // Fix inventory item issues that may cause save corruption
-  ""FixProfileBreakingInventoryItemIssues"": false,
+    // Default false, Whether to remove invalid trader data to prevent save corruption
+    ""RemoveInvalidTradersFromProfile"": false,
 
-  // Enable tweaks for ammo loading/unloading speed
-  ""EnableAmmoLoadTweaks"": true,
+    // Default false, Fix inventory item issues that may cause save corruption
+    ""FixProfileBreakingInventoryItemIssues"": false
+  },
 
-  // Default 0.85, base loading time (seconds). Smaller values = faster loading
-  ""BaseLoadTime"": 0.05,
+  ""RaidTweaks"": {
+    // Whether to enable Raid tweaks category
+    ""Enabled"": true,
 
-  // Default 0.3, base unloading time (seconds). Smaller values = faster unloading
-  ""BaseUnLoadTime"": 0.05,
+    // Default 35, Time limit per raid (minutes)
+    ""RaidTimeMinutes"": 120
+  },
 
-  // Time limit per raid (minutes)
-  ""RaidTimeMinutes"": 120,
+  ""AmmoTweaks"": {
+    // Whether to enable Ammo tweaks category
+    ""Enabled"": true,
 
-  // Ammo stack multiplier, e.g. 6 means originally 30 rounds per slot → 180 rounds
-  ""AmmoStackMultiplier"": 6
+    // Default 0.85, base loading time (seconds). Smaller values = faster loading
+    ""BaseLoadTime"": 0.05,
+
+    // Default 0.3, base unloading time (seconds). Smaller values = faster unloading
+    ""BaseUnLoadTime"": 0.05,
+
+    // Default 1, Ammo stack multiplier, e.g. 6 means originally 30 rounds per slot → 180 rounds
+    ""AmmoStackMultiplier"": 6
+  }
 }";
 
         File.WriteAllText(configPath, jsonc, Encoding.UTF8);
@@ -166,12 +181,29 @@ public class Main(
 
 public class ModConfig
 {
+    public CoreFixesConfig CoreFixes { get; set; } = new CoreFixesConfig();
+    public RaidTweaksConfig RaidTweaks { get; set; } = new RaidTweaksConfig();
+    public AmmoTweaksConfig AmmoTweaks { get; set; } = new AmmoTweaksConfig();
+}
+
+public class CoreFixesConfig
+{
+    public bool Enabled { get; set; } = true;
     public bool RemoveModItemsFromProfile { get; set; } = false;
     public bool RemoveInvalidTradersFromProfile { get; set; } = false;
     public bool FixProfileBreakingInventoryItemIssues { get; set; } = false;
-    public bool EnableAmmoLoadTweaks { get; set; } = true;
+}
+
+public class RaidTweaksConfig
+{
+    public bool Enabled { get; set; } = true;
+    public int RaidTimeMinutes { get; set; } = 120;
+}
+
+public class AmmoTweaksConfig
+{
+    public bool Enabled { get; set; } = true;
     public double BaseLoadTime { get; set; } = 0.05;
     public double BaseUnLoadTime { get; set; } = 0.05;
-    public int RaidTimeMinutes { get; set; } = 120;
     public int AmmoStackMultiplier { get; set; } = 6;
 }
