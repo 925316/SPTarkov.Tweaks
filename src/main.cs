@@ -6,15 +6,10 @@ using SPTarkov.Server.Core.Extensions;
 using SPTarkov.Server.Core.Helpers.Server;
 using SPTarkov.Server.Core.Models.Eft.Common;
 using SPTarkov.Server.Core.Models.Eft.Common.Tables;
-using SPTarkov.Server.Core.Models.Enums;
-using SPTarkov.Server.Core.Models.Enums.Hideout;
-using SPTarkov.Server.Core.Models.Spt.Config;
 using SPTarkov.Server.Core.Models.Spt.Mod;
 using SPTarkov.Server.Core.Models.Spt.Tables;
-using SPTarkov.Server.Core.Models.Utils;
 using System.Reflection;
-using System.Text;
-using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Speedloader;
 
@@ -37,7 +32,6 @@ public record ModMetadata : IModMetadata
 public class Main(
     ISptLogger<Main> logger,
     ModHelper modHelper,
-    CoreConfig coreConfig,
     GlobalTable globalTable,
     LocationTable locationTable,
     TemplateTable templateTable
@@ -45,219 +39,150 @@ public class Main(
     : IOnLoad
 {
     private const string m_ammoParentId = "5485a8684bdc2da71d8b4567";
+    private const string m_armBandParentId = "5b3f15d486f77432d0509248";
+
+    private JsonObject? config;
 
     public Task OnLoadAsync(CancellationToken cancellationToken)
     {
-        var pathToMod = modHelper.GetAbsolutePathToModFolder(Assembly.GetExecutingAssembly());
-        var configPath = System.IO.Path.Combine(pathToMod, "config.jsonc");
-        ModConfig config;
+        config = null;
 
         try
         {
-            if (File.Exists(configPath))
-            {
-                config = modHelper.GetJsonDataFromFile<ModConfig>(pathToMod, "config.jsonc")
-                         ?? new ModConfig();
-            }
-            else
-            {
-                config = new ModConfig();
-                WriteDefaultConfigWithComments(configPath);
-                logger.Warning("[Speedloader]: config.json not found, created default one.");
-            }
+            config = modHelper.GetJsonDataFromModFile<JsonObject>("db", "config.json");
         }
         catch (Exception ex)
         {
-            logger.Error($"[Speedloader]: Failed to load config.json, using defaults. Error: {ex.Message}");
-            config = new ModConfig();
-            WriteDefaultConfigWithComments(configPath);
+            logger.Warning($"[Speedloader]: db/config.json not loaded, using defaults. Error: {ex.Message}");
         }
 
         var globals = globalTable.Configuration; // globals.json
         var locations = locationTable;
         var items = templateTable.Items;
-        var ragfairSettings = globals.RagFair;
 
-        if (config.SkillTweaks.Enabled)
+        var applied = new List<string>();
+
+        if (GetConfig("GrowthTweaks", "Enabled", false))
         {
-            globals.SkillFatiguePerPoint = config.SkillTweaks.SkillFatiguePerPoint;
-            globals.SkillFatigueReset = config.SkillTweaks.SkillFatigueReset;
-            globals.SkillFreshEffectiveness = config.SkillTweaks.SkillFreshEffectiveness;
-            globals.SkillFreshPoints = config.SkillTweaks.SkillFreshPoints;
-            globals.SkillPointsBeforeFatigue = config.SkillTweaks.SkillPointsBeforeFatigue;
-            globals.SkillMinEffectiveness = config.SkillTweaks.SkillMinEffectiveness;
-            globals.SkillsSettings.SkillProgressRate = config.SkillTweaks.SkillProgressRate;
-            globals.WeaponSkillProgressRate = config.SkillTweaks.WeaponSkillProgressRate;
-            globals.SkillExpPerLevel = config.SkillTweaks.SkillExpPerLevel;
-            globals.Exp.MatchEnd.SurvivedMultiplier = config.SkillTweaks.SurvivedMultiplier;
+            var mult = GetConfig("GrowthTweaks", "Multiplier", 2.5);
 
-            logger.Warning($"[Speedloader]: FatiguePerPoint={config.SkillTweaks.SkillFatiguePerPoint}, " +
-                        $"ProgressRate={config.SkillTweaks.SkillProgressRate}, ExpPerLevel={config.SkillTweaks.SkillExpPerLevel}");
+            // Skill progress rates
+            globals.WeaponSkillProgressRate *= mult;
+            globals.SkillsSettings.WeaponSkillProgressRate *= mult;
+            globals.SkillsSettings.SkillProgressRate *= mult;
+
+            // Experience gains
+            var exp = globals.Exp;
+            exp.Heal.ExpForHeal = Math.Round(exp.Heal.ExpForHeal * mult);
+            exp.Heal.ExpForEnergy = Math.Round(exp.Heal.ExpForEnergy * mult);
+            exp.Heal.ExpForHydration = Math.Round(exp.Heal.ExpForHydration * mult);
+
+            exp.Kill.VictimLevelExperience = Math.Round(exp.Kill.VictimLevelExperience * mult);
+            exp.Kill.VictimBotLevelExperience = Math.Round(exp.Kill.VictimBotLevelExperience * mult);
+            exp.Kill.ExperienceOnDamageAllHealth = Math.Round(exp.Kill.ExperienceOnDamageAllHealth * mult);
+            exp.Kill.BotExperienceOnDamageAllHealth = Math.Round(exp.Kill.BotExperienceOnDamageAllHealth * mult);
+            exp.Kill.PmcExperienceOnDamageAllHealth = Math.Round(exp.Kill.PmcExperienceOnDamageAllHealth * mult);
+            exp.Kill.HeadShotMultiplier *= mult;
+            exp.Kill.BotHeadShotMultiplier *= mult;
+            exp.Kill.PmcHeadShotMultiplier *= mult;
+
+            exp.MatchEnd.SurvivedMultiplier *= mult;
+            exp.MatchEnd.MiaMultiplier *= mult;
+            exp.MatchEnd.RunnerMultiplier *= mult;
+            exp.MatchEnd.LeftMultiplier *= mult;
+            exp.MatchEnd.KilledMultiplier *= mult;
+            exp.MatchEnd.SurvivedExperienceReward = (int)Math.Round(exp.MatchEnd.SurvivedExperienceReward * mult);
+            exp.MatchEnd.MiaExperienceReward = (int)Math.Round(exp.MatchEnd.MiaExperienceReward * mult);
+            exp.MatchEnd.RunnerExperienceReward = (int)Math.Round(exp.MatchEnd.RunnerExperienceReward * mult);
+            exp.MatchEnd.TransitExperienceReward = Math.Round(exp.MatchEnd.TransitExperienceReward * mult);
+
+            exp.TriggerMult = Math.Round(exp.TriggerMult * mult);
+            exp.ExpForLevelOneDogtag *= mult;
+            exp.ExpForLockedDoorOpen = (int)Math.Round(exp.ExpForLockedDoorOpen * mult);
+            exp.ExpForLockedDoorBreach = (int)Math.Round(exp.ExpForLockedDoorBreach * mult);
+
+            foreach (var lootAttempt in exp.LootAttempts ?? [])
+            {
+                lootAttempt.ExperiencePoints *= mult;
+            }
+
+            applied.Add($"Growth x{mult}");
         }
 
-        if (config.CoreFixes.Enabled)
+        if (GetConfig("AmmoTweaks", "Enabled", true))
         {
-            coreConfig.Fixes.RemoveModItemsFromProfile = config.CoreFixes.RemoveModItemsFromProfile;
-            coreConfig.Fixes.RemoveInvalidTradersFromProfile = config.CoreFixes.RemoveInvalidTradersFromProfile;
-            coreConfig.Fixes.FixProfileBreakingInventoryItemIssues = config.CoreFixes.FixProfileBreakingInventoryItemIssues;
+            var loadTime = GetConfig("AmmoTweaks", "BaseLoadTime", 0.05);
+            var unloadTime = GetConfig("AmmoTweaks", "BaseUnLoadTime", 0.05);
+            var stackMult = GetConfig("AmmoTweaks", "AmmoStackMultiplier", 6);
 
-            logger.Warning($"[Speedloader]: RemoveModItemsFromProfile = {coreConfig.Fixes.RemoveModItemsFromProfile}, " +
-                           $"RemoveInvalidTradersFromProfile = {coreConfig.Fixes.RemoveInvalidTradersFromProfile}, " +
-                           $"FixProfileBreakingInventoryItemIssues = {coreConfig.Fixes.FixProfileBreakingInventoryItemIssues}");
+            globals.BaseLoadTime = loadTime;
+            globals.BaseUnloadTime = unloadTime;
+            applied.Add($"Ammo(load {loadTime}s, stack x{stackMult})");
+
+            if (stackMult > 1)
+            {
+                foreach (var kvp in items)
+                {
+                    var item = kvp.Value;
+                    if (item.Parent.ToString() == m_ammoParentId && item.Properties != null)
+                    {
+                        item.Properties.StackMaxSize *= stackMult;
+                    }
+                }
+            }
         }
 
-        if (config.AmmoTweaks.Enabled)
+        if (GetConfig("RaidTweaks", "Enabled", true))
         {
-            globals.BaseLoadTime = config.AmmoTweaks.BaseLoadTime;
-            globals.BaseUnloadTime = config.AmmoTweaks.BaseUnLoadTime;
-            logger.Info($"[Speedloader]: BaseLoadTime = {config.AmmoTweaks.BaseLoadTime} seconds, BaseUnloadTime = {config.AmmoTweaks.BaseUnLoadTime} seconds");
-        }
+            var raidMinutes = GetConfig("RaidTweaks", "RaidTimeMinutes", 120);
 
-        if (config.RaidTweaks.Enabled)
-        {
             foreach (var kvp in locations.GetAllPropertiesAsDictionary())
             {
                 if (kvp.Value is Location location && location.Base != null)
                 {
-                    location.Base.ExitAccessTime = config.RaidTweaks.RaidTimeMinutes;
-                    location.Base.EscapeTimeLimit = config.RaidTweaks.RaidTimeMinutes;
-                    location.Base.EscapeTimeLimitCoop = config.RaidTweaks.RaidTimeMinutes;
-                    location.Base.EscapeTimeLimitPVE = config.RaidTweaks.RaidTimeMinutes;
+                    location.Base.ExitAccessTime = raidMinutes;
+                    location.Base.EscapeTimeLimit = raidMinutes;
+                    location.Base.EscapeTimeLimitCoop = raidMinutes;
+                    location.Base.EscapeTimeLimitPVE = raidMinutes;
                 }
             }
-            logger.Info($"[Speedloader]: All locations EscapeTimeLimit set to {config.RaidTweaks.RaidTimeMinutes} minutes");
+            applied.Add($"Raid {raidMinutes}min");
         }
 
-        if (config.AmmoTweaks.Enabled)
+        if (GetConfig("ArmBandTweaks", "Enabled", false))
         {
+            var weightKg = GetConfig("ArmBandTweaks", "WeightKg", -100);
+            var armbandCount = 0;
+
             foreach (var kvp in items)
             {
                 var item = kvp.Value;
-                if (config.AmmoTweaks.AmmoStackMultiplier > 1 && item.Parent.ToString() == m_ammoParentId)
+                if (item.Parent.ToString() == m_armBandParentId && item.Properties != null)
                 {
-                    item.Properties.StackMaxSize *= config.AmmoTweaks.AmmoStackMultiplier;
+                    item.Properties.Weight = weightKg;
+                    armbandCount++;
                 }
             }
-            logger.Info($"[Speedloader]: The bullet stack has been adjusted by {config.AmmoTweaks.AmmoStackMultiplier} times");
+
+            applied.Add($"Armband {armbandCount}x {weightKg}kg");
+        }
+
+        if (applied.Count > 0)
+        {
+            logger.Info($"[Speedloader]: {string.Join(", ", applied)}");
         }
 
         return Task.CompletedTask;
     }
 
-    public static void WriteDefaultConfigWithComments(string configPath)
+    private T GetConfig<T>(string section, string key, T fallback) where T : struct
     {
-        var jsonc = @"{
-  ""CoreFixes"": {
-    // Whether to enable Core fixes category
-    ""Enabled"": true,
+        if (config is null || config[section] is not JsonObject sectionObject || sectionObject[key] is not JsonValue value
+            || !value.TryGetValue(out T result))
+        {
+            return fallback;
+        }
 
-    // Default false, Whether to remove items added by Mods from the player profile
-    ""RemoveModItemsFromProfile"": false,
-
-    // Default false, Whether to remove invalid trader data to prevent save corruption
-    ""RemoveInvalidTradersFromProfile"": false,
-
-    // Default false, Fix inventory item issues that may cause save corruption
-    ""FixProfileBreakingInventoryItemIssues"": false
-  },
-
-  ""RaidTweaks"": {
-    // Whether to enable Raid tweaks category
-    ""Enabled"": true,
-
-    // Default 35, Time limit per raid (minutes)
-    ""RaidTimeMinutes"": 120
-  },
-
-  ""AmmoTweaks"": {
-    // Whether to enable Ammo tweaks category
-    ""Enabled"": true,
-
-    // Default 0.85, base loading time (seconds). Smaller values = faster loading
-    ""BaseLoadTime"": 0.05,
-
-    // Default 0.3, base unloading time (seconds). Smaller values = faster unloading
-    ""BaseUnLoadTime"": 0.05,
-
-    // Default 1, Ammo stack multiplier, e.g. 6 means originally 30 rounds per slot -> 180 rounds
-    ""AmmoStackMultiplier"": 6
-  },
-
-""SkillTweaks"": {
-  // Whether to enable Skill tweaks category
-  ""Enabled"": true,
-
-  // Fatigue multiplier per skill point (default 1 = no fatigue penalty)
-  ""SkillFatiguePerPoint"": 1,
-
-  // Fatigue reset time in seconds (default 0 = never fatigued)
-  ""SkillFatigueReset"": 0,
-
-  // Initial skill effectiveness multiplier
-  ""SkillFreshEffectiveness"": 1.5,
-
-  // Points before fatigue starts
-  ""SkillPointsBeforeFatigue"": 1,
-
-  // Minimum effectiveness multiplier
-  ""SkillMinEffectiveness"": 1,
-
-  // Global skill progress rate multiplier
-  ""SkillProgressRate"": 1.8,
-
-  // Weapon skill progress rate multiplier
-  ""WeaponSkillProgressRate"": 1.8,
-
-  // Experience required per level
-  ""SkillExpPerLevel"": 150
-}
-}";
-
-        File.WriteAllText(configPath, jsonc, Encoding.UTF8);
+        return result;
     }
-}
-
-public class ModConfig
-{
-    public CoreFixesConfig CoreFixes { get; set; } = new CoreFixesConfig();
-    public RaidTweaksConfig RaidTweaks { get; set; } = new RaidTweaksConfig();
-    public AmmoTweaksConfig AmmoTweaks { get; set; } = new AmmoTweaksConfig();
-    public SkillTweaksConfig SkillTweaks { get; set; } = new SkillTweaksConfig();
-}
-
-public class CoreFixesConfig
-{
-    public bool Enabled { get; set; } = true;
-    public bool RemoveModItemsFromProfile { get; set; } = false;
-    public bool RemoveInvalidTradersFromProfile { get; set; } = false;
-    public bool FixProfileBreakingInventoryItemIssues { get; set; } = false;
-}
-
-public class RaidTweaksConfig
-{
-    public bool Enabled { get; set; } = true;
-    public int RaidTimeMinutes { get; set; } = 120;
-}
-
-public class AmmoTweaksConfig
-{
-    public bool Enabled { get; set; } = true;
-    public double BaseLoadTime { get; set; } = 0.05;
-    public double BaseUnLoadTime { get; set; } = 0.05;
-    public int AmmoStackMultiplier { get; set; } = 6;
-}
-
-public class SkillTweaksConfig
-{
-    public bool Enabled { get; set; } = true;
-    public double SkillFatiguePerPoint { get; set; } = 1;
-    public int SkillFatigueReset { get; set; } = 0;
-    public double SkillFreshEffectiveness { get; set; } = 1.5;
-    public int SkillFreshPoints { get; set; } = 1;
-    public int SkillPointsBeforeFatigue { get; set; } = 1;
-    public double SkillMinEffectiveness { get; set; } = 1;
-    public double SkillProgressRate { get; set; } = 1.8;
-    public double WeaponSkillProgressRate { get; set; } = 1.8;
-    public int SkillExpPerLevel { get; set; } = 150;
-    public double SurvivedMultiplier { get; set; } = 2.5;
 }

@@ -1,0 +1,20 @@
+{
+  "GrowthTweaks": {
+    "Enabled": false,
+    "Multiplier": 2.5
+  },
+  "RaidTweaks": {
+    "Enabled": true,
+    "RaidTimeMinutes": 120
+  },
+  "AmmoTweaks": {
+    "Enabled": true,
+    "BaseLoadTime": 0.05,
+    "BaseUnLoadTime": 0.05,
+    "AmmoStackMultiplier": 6
+  },
+  "ArmBandTweaks": {
+    "Enabled": false,
+    "WeightKg": -100
+  }
+}
