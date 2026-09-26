@@ -4,6 +4,7 @@ using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
 using SPTarkov.Server.Core.Extensions;
 using SPTarkov.Server.Core.Helpers.Server;
+using SPTarkov.Server.Core.Models.Common;
 using SPTarkov.Server.Core.Models.Eft.Common;
 using SPTarkov.Server.Core.Models.Eft.Common.Tables;
 using SPTarkov.Server.Core.Models.Spt.Mod;
@@ -28,7 +29,7 @@ public record ModMetadata : IModMetadata
     public bool HasPrepatcher { get; init; } = false;
 }
 
-[Injectable(TypePriority = OnLoadOrder.PostLoad + 1)]
+[Injectable(TypePriority = int.MaxValue - 1000)]
 public class Main(
     ISptLogger<Main> logger,
     ModHelper modHelper,
@@ -36,12 +37,13 @@ public class Main(
     LocationTable locationTable,
     TemplateTable templateTable
     )
-    : IOnLoad
+    : IOnLoad, IOnUpdate
 {
     private const string m_ammoParentId = "5485a8684bdc2da71d8b4567";
     private const string m_armBandParentId = "5b3f15d486f77432d0509248";
 
     private JsonObject? config;
+    private int? _raidMinutes;
 
     public Task OnLoadAsync(CancellationToken cancellationToken)
     {
@@ -57,7 +59,6 @@ public class Main(
         }
 
         var globals = globalTable.Configuration; // globals.json
-        var locations = locationTable;
         var items = templateTable.Items;
 
         var applied = new List<string>();
@@ -134,19 +135,8 @@ public class Main(
 
         if (GetConfig("RaidTweaks", "Enabled", true))
         {
-            var raidMinutes = GetConfig("RaidTweaks", "RaidTimeMinutes", 120);
-
-            foreach (var kvp in locations.GetAllPropertiesAsDictionary())
-            {
-                if (kvp.Value is Location location && location.Base != null)
-                {
-                    location.Base.ExitAccessTime = raidMinutes;
-                    location.Base.EscapeTimeLimit = raidMinutes;
-                    location.Base.EscapeTimeLimitCoop = raidMinutes;
-                    location.Base.EscapeTimeLimitPVE = raidMinutes;
-                }
-            }
-            applied.Add($"Raid {raidMinutes}min");
+            _raidMinutes = GetConfig("RaidTweaks", "RaidTimeMinutes", 120);
+            applied.Add($"Raid {_raidMinutes}min");
         }
 
         if (GetConfig("ArmBandTweaks", "Enabled", false))
@@ -173,6 +163,27 @@ public class Main(
         }
 
         return Task.CompletedTask;
+    }
+
+    public Task<bool> OnUpdateAsync(long secondsSinceLastRun, CancellationToken cancellationToken)
+    {
+        if (_raidMinutes is int raidMinutes)
+        {
+            foreach (var (_, location) in locationTable.GetDictionary())
+            {
+                if (location?.Base == null)
+                {
+                    continue;
+                }
+
+                location.Base.ExitAccessTime = raidMinutes;
+                location.Base.EscapeTimeLimit = raidMinutes;
+                location.Base.EscapeTimeLimitCoop = raidMinutes;
+                location.Base.EscapeTimeLimitPVE = raidMinutes;
+            }
+        }
+
+        return Task.FromResult(true);
     }
 
     private T GetConfig<T>(string section, string key, T fallback) where T : struct
