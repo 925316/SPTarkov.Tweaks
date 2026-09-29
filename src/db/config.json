@@ -16,5 +16,9 @@
   "ArmBandTweaks": {
     "Enabled": false,
     "WeightKg": -100
+  },
+  "MoneyTweaks": {
+    "Enabled": true,
+    "MaxInLobby": 1000000
   }
 }

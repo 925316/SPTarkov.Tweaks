@@ -37,13 +37,13 @@ public class Main(
     LocationTable locationTable,
     TemplateTable templateTable
     )
-    : IOnLoad, IOnUpdate
+    : IOnLoad
 {
     private const string m_ammoParentId = "5485a8684bdc2da71d8b4567";
     private const string m_armBandParentId = "5b3f15d486f77432d0509248";
+    private const string m_rublesItemId = "5449016a4bdc2d6f028b456f";
 
     private JsonObject? config;
-    private int? _raidMinutes;
 
     public Task OnLoadAsync(CancellationToken cancellationToken)
     {
@@ -135,8 +135,22 @@ public class Main(
 
         if (GetConfig("RaidTweaks", "Enabled", true))
         {
-            _raidMinutes = GetConfig("RaidTweaks", "RaidTimeMinutes", 120);
-            applied.Add($"Raid {_raidMinutes}min");
+            var raidMinutes = GetConfig("RaidTweaks", "RaidTimeMinutes", 120);
+
+            foreach (var (_, location) in locationTable.GetDictionary())
+            {
+                if (location?.Base == null)
+                {
+                    continue;
+                }
+
+                location.Base.ExitAccessTime = raidMinutes;
+                location.Base.EscapeTimeLimit = raidMinutes;
+                location.Base.EscapeTimeLimitCoop = raidMinutes;
+                location.Base.EscapeTimeLimitPVE = raidMinutes;
+            }
+
+            applied.Add($"Raid {raidMinutes}min");
         }
 
         if (GetConfig("ArmBandTweaks", "Enabled", false))
@@ -157,33 +171,35 @@ public class Main(
             applied.Add($"Armband {armbandCount}x {weightKg}kg");
         }
 
+        if (GetConfig("MoneyTweaks", "Enabled", true))
+        {
+            var maxLobby = GetConfig("MoneyTweaks", "MaxInLobby", 1000000);
+            var rublesId = new MongoId(m_rublesItemId);
+
+            foreach (var restriction in globals.RestrictionsInRaid)
+            {
+                if (restriction.TemplateId == rublesId)
+                {
+                    restriction.MaxInLobby = maxLobby;
+
+                    if (restriction.MaxInRaid < maxLobby)
+                    {
+                        restriction.MaxInRaid = maxLobby;
+                    }
+
+                    applied.Add($"Money carry {maxLobby}");
+                    break;
+                }
+            }
+        }
+
+
         if (applied.Count > 0)
         {
             logger.Info($"[Speedloader]: {string.Join(", ", applied)}");
         }
 
         return Task.CompletedTask;
-    }
-
-    public Task<bool> OnUpdateAsync(long secondsSinceLastRun, CancellationToken cancellationToken)
-    {
-        if (_raidMinutes is int raidMinutes)
-        {
-            foreach (var (_, location) in locationTable.GetDictionary())
-            {
-                if (location?.Base == null)
-                {
-                    continue;
-                }
-
-                location.Base.ExitAccessTime = raidMinutes;
-                location.Base.EscapeTimeLimit = raidMinutes;
-                location.Base.EscapeTimeLimitCoop = raidMinutes;
-                location.Base.EscapeTimeLimitPVE = raidMinutes;
-            }
-        }
-
-        return Task.FromResult(true);
     }
 
     private T GetConfig<T>(string section, string key, T fallback) where T : struct
