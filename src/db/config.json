@@ -20,5 +20,9 @@
   "MoneyTweaks": {
     "Enabled": true,
     "MaxInLobby": 1000000
+  },
+  "HideoutTweaks": {
+    "Enabled": true,
+    "OperationTimeSeconds": 3
   }
 }

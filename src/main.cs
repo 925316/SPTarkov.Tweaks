@@ -7,6 +7,7 @@ using SPTarkov.Server.Core.Helpers.Server;
 using SPTarkov.Server.Core.Models.Common;
 using SPTarkov.Server.Core.Models.Eft.Common;
 using SPTarkov.Server.Core.Models.Eft.Common.Tables;
+using SPTarkov.Server.Core.Models.Spt.Config;
 using SPTarkov.Server.Core.Models.Spt.Mod;
 using SPTarkov.Server.Core.Models.Spt.Tables;
 using System.Reflection;
@@ -35,7 +36,9 @@ public class Main(
     ModHelper modHelper,
     GlobalTable globalTable,
     LocationTable locationTable,
-    TemplateTable templateTable
+    TemplateTable templateTable,
+    HideoutTable hideoutTable,
+    HideoutConfig hideoutConfig
     )
     : IOnLoad
 {
@@ -193,6 +196,78 @@ public class Main(
             }
         }
 
+        if (GetConfig("HideoutTweaks", "Enabled", true))
+        {
+            var opSeconds = GetConfig("HideoutTweaks", "OperationTimeSeconds", 3);
+
+            if (opSeconds > 0)
+            {
+                var capped = 0;
+
+                foreach (var area in hideoutTable.Areas.Concat(hideoutTable.CustomAreas ?? []))
+                {
+                    if (area.Stages is null)
+                    {
+                        continue;
+                    }
+
+                    foreach (var (_, stage) in area.Stages)
+                    {
+                        if (stage.ConstructionTime is double buildTime && buildTime > opSeconds)
+                        {
+                            stage.ConstructionTime = opSeconds;
+                            capped++;
+                        }
+
+                        if (stage.Improvements is null)
+                        {
+                            continue;
+                        }
+
+                        foreach (var improvement in stage.Improvements)
+                        {
+                            if (improvement.ImprovementTime is double improveTime && improveTime > opSeconds)
+                            {
+                                improvement.ImprovementTime = opSeconds;
+                                capped++;
+                            }
+                        }
+                    }
+                }
+
+                foreach (var recipe in hideoutTable.Production.Recipes ?? [])
+                {
+                    if (recipe.ProductionTime is double craftTime && craftTime > opSeconds)
+                    {
+                        recipe.ProductionTime = opSeconds;
+                        capped++;
+                    }
+                }
+
+                foreach (var scavRecipe in hideoutTable.Production.ScavRecipes ?? [])
+                {
+                    if (scavRecipe.ProductionTime is double scavTime && scavTime > opSeconds)
+                    {
+                        scavRecipe.ProductionTime = opSeconds;
+                        capped++;
+                    }
+                }
+
+                var cultistCircle = hideoutConfig.CultistCircle;
+                cultistCircle.CraftTimeOverride = opSeconds;
+
+                foreach (var directReward in cultistCircle.DirectRewards)
+                {
+                    if (directReward.CraftTimeSeconds > opSeconds)
+                    {
+                        directReward.CraftTimeSeconds = opSeconds;
+                        capped++;
+                    }
+                }
+
+                applied.Add($"Hideout ops {opSeconds}s (capped {capped})");
+            }
+        }
 
         if (applied.Count > 0)
         {
