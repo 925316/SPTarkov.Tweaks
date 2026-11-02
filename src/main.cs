@@ -43,12 +43,18 @@ public class Main(
     : IOnLoad
 {
     private static readonly MongoId m_ammoParentId = "5485a8684bdc2da71d8b4567";
-    private static readonly MongoId m_rublesItemId = "5449016a4bdc2d6f028b456f";
     private static readonly MongoId m_purseItemId = "5732ee6a24597719ae0c0281";
     private static readonly MongoId m_propitalItemId = "5c0e530286f7747fa1419862";
 
     private const string m_propitalBuffName = "BuffsPropital";
     private const string m_defaultExplosiveBulletId = "5fc382b6d6fa9c00c571bbc3"; // .338 TAC-X
+
+    private static readonly MongoId[] m_currencyItemIds =
+    [
+        "5449016a4bdc2d6f028b456f", // Rubles
+        "5696686a4bdc2da3298b456a", // Dollars
+        "569668774bdc2da2298b4568", // Euro
+    ];
 
     private JsonObject? config;
 
@@ -184,23 +190,46 @@ public class Main(
         if (GetConfig("MoneyTweaks", "Enabled", false))
         {
             var maxLobby = GetConfig("MoneyTweaks", "MaxInLobby", 1000000);
+            var stackMult = GetConfig("MoneyTweaks", "StackMultiplier", 1);
 
-            foreach (var restriction in globals.RestrictionsInRaid)
+            if (maxLobby <= 0)
             {
-                if (restriction.TemplateId != m_rublesItemId)
+                logger.Warning($"[Speedloader]: MoneyTweaks.MaxInLobby is {maxLobby}, skipped.");
+            }
+            else
+            {
+                var currencies = new ReadOnlySpan<MongoId>(m_currencyItemIds);
+                var matched = 0;
+
+                foreach (var restriction in globals.RestrictionsInRaid)
                 {
-                    continue;
+                    if (!currencies.Contains(restriction.TemplateId))
+                    {
+                        continue;
+                    }
+
+                    restriction.MaxInLobby = maxLobby;
+
+                    if (restriction.MaxInRaid < maxLobby)
+                    {
+                        restriction.MaxInRaid = maxLobby;
+                    }
+
+                    matched++;
                 }
 
-                restriction.MaxInLobby = maxLobby;
-
-                if (restriction.MaxInRaid < maxLobby)
+                if (stackMult > 1)
                 {
-                    restriction.MaxInRaid = maxLobby;
+                    foreach (var currencyId in currencies)
+                    {
+                        if (items.TryGetValue(currencyId, out var currency) && currency.Properties is { } currencyProperties)
+                        {
+                            currencyProperties.StackMaxSize *= stackMult;
+                        }
+                    }
                 }
 
-                applied.Add($"Money carry {maxLobby}");
-                break;
+                applied.Add($"Money(carry {maxLobby}, {matched} currencies, stack x{stackMult})");
             }
         }
 

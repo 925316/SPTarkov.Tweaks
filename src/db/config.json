@@ -19,7 +19,8 @@
   },
   "MoneyTweaks": {
     "Enabled": false,
-    "MaxInLobby": 1000000
+    "MaxInLobby": 1000000,
+    "StackMultiplier": 1
   },
   "HideoutTweaks": {
     "Enabled": false,
