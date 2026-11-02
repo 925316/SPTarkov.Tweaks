@@ -1,4 +1,3 @@
-using SPTarkov.Common.Extensions;
 using SPTarkov.Common.Models.Logging;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
@@ -7,10 +6,10 @@ using SPTarkov.Server.Core.Helpers.Server;
 using SPTarkov.Server.Core.Models.Common;
 using SPTarkov.Server.Core.Models.Eft.Common;
 using SPTarkov.Server.Core.Models.Eft.Common.Tables;
+using SPTarkov.Server.Core.Models.Eft.Hideout;
 using SPTarkov.Server.Core.Models.Spt.Config;
 using SPTarkov.Server.Core.Models.Spt.Mod;
 using SPTarkov.Server.Core.Models.Spt.Tables;
-using System.Reflection;
 using System.Text.Json.Nodes;
 using DamageEffectType = SPTarkov.Server.Core.Models.Enums.DamageEffectType;
 
@@ -43,10 +42,11 @@ public class Main(
     )
     : IOnLoad
 {
-    private const string m_ammoParentId = "5485a8684bdc2da71d8b4567";
-    private const string m_rublesItemId = "5449016a4bdc2d6f028b456f";
-    private const string m_purseItemId = "5732ee6a24597719ae0c0281";
-    private const string m_propitalItemId = "5c0e530286f7747fa1419862";
+    private static readonly MongoId m_ammoParentId = "5485a8684bdc2da71d8b4567";
+    private static readonly MongoId m_rublesItemId = "5449016a4bdc2d6f028b456f";
+    private static readonly MongoId m_purseItemId = "5732ee6a24597719ae0c0281";
+    private static readonly MongoId m_propitalItemId = "5c0e530286f7747fa1419862";
+
     private const string m_propitalBuffName = "BuffsPropital";
     private const string m_defaultExplosiveBulletId = "5fc382b6d6fa9c00c571bbc3"; // .338 TAC-X
 
@@ -68,7 +68,7 @@ public class Main(
         var globals = globalTable.Configuration; // globals.json
         var items = templateTable.Items;
 
-        var applied = new List<string>();
+        var applied = new List<string>(8);
 
         if (GetConfig("GrowthTweaks", "Enabled", false))
         {
@@ -109,9 +109,12 @@ public class Main(
             exp.ExpForLockedDoorOpen = (int)Math.Round(exp.ExpForLockedDoorOpen * mult);
             exp.ExpForLockedDoorBreach = (int)Math.Round(exp.ExpForLockedDoorBreach * mult);
 
-            foreach (var lootAttempt in exp.LootAttempts ?? [])
+            if (exp.LootAttempts is { } lootAttempts)
             {
-                lootAttempt.ExperiencePoints *= mult;
+                foreach (var lootAttempt in lootAttempts)
+                {
+                    lootAttempt.ExperiencePoints *= mult;
+                }
             }
 
             applied.Add($"Growth x{mult}");
@@ -125,36 +128,37 @@ public class Main(
 
             globals.BaseLoadTime = loadTime;
             globals.BaseUnloadTime = unloadTime;
-            applied.Add($"Ammo(load {loadTime}s, stack x{stackMult})");
 
             if (stackMult > 1)
             {
-                foreach (var kvp in items)
+                foreach (var item in items.Values)
                 {
-                    var item = kvp.Value;
-                    if (item.Parent.ToString() == m_ammoParentId && item.Properties != null)
+                    // Compare MongoId structs directly; ToString() here would allocate once per item
+                    if (item.Parent == m_ammoParentId && item.Properties is { } properties)
                     {
-                        item.Properties.StackMaxSize *= stackMult;
+                        properties.StackMaxSize *= stackMult;
                     }
                 }
             }
+
+            applied.Add($"Ammo(load {loadTime}s, stack x{stackMult})");
         }
 
         if (GetConfig("RaidTweaks", "Enabled", true))
         {
             var raidMinutes = GetConfig("RaidTweaks", "RaidTimeMinutes", 120);
 
-            foreach (var (_, location) in locationTable.GetDictionary())
+            foreach (var location in locationTable.GetDictionary().Values)
             {
-                if (location?.Base == null)
+                if (location?.Base is not { } raidBase)
                 {
                     continue;
                 }
 
-                location.Base.ExitAccessTime = raidMinutes;
-                location.Base.EscapeTimeLimit = raidMinutes;
-                location.Base.EscapeTimeLimitCoop = raidMinutes;
-                location.Base.EscapeTimeLimitPVE = raidMinutes;
+                raidBase.ExitAccessTime = raidMinutes;
+                raidBase.EscapeTimeLimit = raidMinutes;
+                raidBase.EscapeTimeLimitCoop = raidMinutes;
+                raidBase.EscapeTimeLimitPVE = raidMinutes;
             }
 
             applied.Add($"Raid {raidMinutes}min");
@@ -165,12 +169,11 @@ public class Main(
             var containerWeightKg = GetConfig("SecuredContainerTweaks", "WeightKg", -100.0);
             var containerCount = 0;
 
-            foreach (var kvp in items)
+            foreach (var (id, container) in items)
             {
-                var container = kvp.Value;
-                if (container.Properties is { IsSecured: true } && kvp.Key.ToString() != m_purseItemId)
+                if (container.Properties is { IsSecured: true } properties && id != m_purseItemId)
                 {
-                    container.Properties.Weight = containerWeightKg;
+                    properties.Weight = containerWeightKg;
                     containerCount++;
                 }
             }
@@ -181,115 +184,54 @@ public class Main(
         if (GetConfig("MoneyTweaks", "Enabled", false))
         {
             var maxLobby = GetConfig("MoneyTweaks", "MaxInLobby", 1000000);
-            var rublesId = new MongoId(m_rublesItemId);
 
             foreach (var restriction in globals.RestrictionsInRaid)
             {
-                if (restriction.TemplateId == rublesId)
+                if (restriction.TemplateId != m_rublesItemId)
                 {
-                    restriction.MaxInLobby = maxLobby;
-
-                    if (restriction.MaxInRaid < maxLobby)
-                    {
-                        restriction.MaxInRaid = maxLobby;
-                    }
-
-                    applied.Add($"Money carry {maxLobby}");
-                    break;
+                    continue;
                 }
+
+                restriction.MaxInLobby = maxLobby;
+
+                if (restriction.MaxInRaid < maxLobby)
+                {
+                    restriction.MaxInRaid = maxLobby;
+                }
+
+                applied.Add($"Money carry {maxLobby}");
+                break;
             }
         }
 
         if (GetConfig("HideoutTweaks", "Enabled", false))
         {
-            var opSeconds = GetConfig("HideoutTweaks", "OperationTimeSeconds", 3);
+            var operationSeconds = GetConfig("HideoutTweaks", "OperationTimeSeconds", 3);
 
-            if (opSeconds > 0)
+            if (operationSeconds > 0)
             {
-                var capped = 0;
-
-                foreach (var area in hideoutTable.Areas.Concat(hideoutTable.CustomAreas ?? []))
-                {
-                    if (area.Stages is null)
-                    {
-                        continue;
-                    }
-
-                    foreach (var (_, stage) in area.Stages)
-                    {
-                        if (stage.ConstructionTime is double buildTime && buildTime > opSeconds)
-                        {
-                            stage.ConstructionTime = opSeconds;
-                            capped++;
-                        }
-
-                        if (stage.Improvements is null)
-                        {
-                            continue;
-                        }
-
-                        foreach (var improvement in stage.Improvements)
-                        {
-                            if (improvement.ImprovementTime is double improveTime && improveTime > opSeconds)
-                            {
-                                improvement.ImprovementTime = opSeconds;
-                                capped++;
-                            }
-                        }
-                    }
-                }
-
-                foreach (var recipe in hideoutTable.Production.Recipes ?? [])
-                {
-                    if (recipe.ProductionTime is double craftTime && craftTime > opSeconds)
-                    {
-                        recipe.ProductionTime = opSeconds;
-                        capped++;
-                    }
-                }
-
-                foreach (var scavRecipe in hideoutTable.Production.ScavRecipes ?? [])
-                {
-                    if (scavRecipe.ProductionTime is double scavTime && scavTime > opSeconds)
-                    {
-                        scavRecipe.ProductionTime = opSeconds;
-                        capped++;
-                    }
-                }
-
-                var cultistCircle = hideoutConfig.CultistCircle;
-                cultistCircle.CraftTimeOverride = opSeconds;
-
-                foreach (var directReward in cultistCircle.DirectRewards)
-                {
-                    if (directReward.CraftTimeSeconds > opSeconds)
-                    {
-                        directReward.CraftTimeSeconds = opSeconds;
-                        capped++;
-                    }
-                }
-
-                applied.Add($"Hideout ops {opSeconds}s (capped {capped})");
+                var capped = CapHideoutTimes(hideoutTable, hideoutConfig, operationSeconds);
+                applied.Add($"Hideout ops {operationSeconds}s (capped {capped})");
             }
         }
 
         if (GetConfig("PropitalTweaks", "Enabled", false)
-            && items.TryGetValue(new MongoId(m_propitalItemId), out var propital)
-            && propital.Properties is { } propitalProps)
+            && items.TryGetValue(m_propitalItemId, out var propital)
+            && propital.Properties is { } propitalProperties)
         {
             var uses = GetConfig("PropitalTweaks", "Uses", 9);
             var effectSeconds = GetConfig("PropitalTweaks", "EffectSeconds", 300d);
 
             // Charges: a zero hpResourceRate makes each use cost exactly one charge instead of hp
-            propitalProps.MaxHpResource = uses;
-            propitalProps.HpResourceRate = 0;
+            propitalProperties.MaxHpResource = uses;
+            propitalProperties.HpResourceRate = 0;
 
-            propitalProps.EffectsDamage ??= new Dictionary<DamageEffectType, EffectsDamageProperties>();
-            propitalProps.EffectsDamage[DamageEffectType.LightBleeding] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = 0, FadeOut = 0 };
-            propitalProps.EffectsDamage[DamageEffectType.HeavyBleeding] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = 0, FadeOut = 0 };
-            propitalProps.EffectsDamage[DamageEffectType.Fracture] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = 0, FadeOut = 0 };
-            propitalProps.EffectsDamage[DamageEffectType.Contusion] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = effectSeconds, FadeOut = 0 };
-            propitalProps.EffectsDamage[DamageEffectType.Pain] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = effectSeconds, FadeOut = 5 };
+            propitalProperties.EffectsDamage ??= new Dictionary<DamageEffectType, EffectsDamageProperties>();
+            propitalProperties.EffectsDamage[DamageEffectType.LightBleeding] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = 0, FadeOut = 0 };
+            propitalProperties.EffectsDamage[DamageEffectType.HeavyBleeding] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = 0, FadeOut = 0 };
+            propitalProperties.EffectsDamage[DamageEffectType.Fracture] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = 0, FadeOut = 0 };
+            propitalProperties.EffectsDamage[DamageEffectType.Contusion] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = effectSeconds, FadeOut = 0 };
+            propitalProperties.EffectsDamage[DamageEffectType.Pain] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = effectSeconds, FadeOut = 5 };
 
             // Names are client side EStimulatorBuffType members; the tail side effects keep their 30s length
             globals.Health.Effects.Stimulator.Buffs[m_propitalBuffName] =
@@ -341,6 +283,106 @@ public class Main(
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Caps every hideout construction, improvement and craft time at <paramref name="cap"/> seconds.
+    /// </summary>
+    /// <returns>Number of times that were actually lowered.</returns>
+    private static int CapHideoutTimes(HideoutTable hideoutTable, HideoutConfig hideoutConfig, int cap)
+    {
+        var capped = 0;
+
+        foreach (var area in hideoutTable.Areas)
+        {
+            capped += CapArea(area, cap);
+        }
+
+        if (hideoutTable.CustomAreas is { } customAreas)
+        {
+            foreach (var area in customAreas)
+            {
+                capped += CapArea(area, cap);
+            }
+        }
+
+        var production = hideoutTable.Production;
+
+        if (production.Recipes is { } recipes)
+        {
+            foreach (var recipe in recipes)
+            {
+                if (recipe.ProductionTime is double craftTime && craftTime > cap)
+                {
+                    recipe.ProductionTime = cap;
+                    capped++;
+                }
+            }
+        }
+
+        if (production.ScavRecipes is { } scavRecipes)
+        {
+            foreach (var scavRecipe in scavRecipes)
+            {
+                if (scavRecipe.ProductionTime is double craftTime && craftTime > cap)
+                {
+                    scavRecipe.ProductionTime = cap;
+                    capped++;
+                }
+            }
+        }
+
+        var cultistCircle = hideoutConfig.CultistCircle;
+        cultistCircle.CraftTimeOverride = cap;
+
+        if (cultistCircle.DirectRewards is { } directRewards)
+        {
+            foreach (var directReward in directRewards)
+            {
+                if (directReward.CraftTimeSeconds > cap)
+                {
+                    directReward.CraftTimeSeconds = cap;
+                    capped++;
+                }
+            }
+        }
+
+        return capped;
+    }
+
+    private static int CapArea(HideoutArea area, double cap)
+    {
+        if (area.Stages is null)
+        {
+            return 0;
+        }
+
+        var capped = 0;
+
+        foreach (var stage in area.Stages.Values)
+        {
+            if (stage.ConstructionTime is double buildTime && buildTime > cap)
+            {
+                stage.ConstructionTime = cap;
+                capped++;
+            }
+
+            if (stage.Improvements is null)
+            {
+                continue;
+            }
+
+            foreach (var improvement in stage.Improvements)
+            {
+                if (improvement.ImprovementTime is double improveTime && improveTime > cap)
+                {
+                    improvement.ImprovementTime = cap;
+                    capped++;
+                }
+            }
+        }
+
+        return capped;
     }
 
     private T GetConfig<T>(string section, string key, T fallback) where T : struct
