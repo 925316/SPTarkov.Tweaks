@@ -49,6 +49,7 @@ public class Main(
     private const string m_propitalBuffName = "BuffsPropital";
     private const string m_defaultExplosiveBulletId = "5fc382b6d6fa9c00c571bbc3"; // .338 TAC-X
 
+    // GP coin shares the Money node but is not currency, so it is deliberately absent.
     private static readonly MongoId[] m_currencyItemIds =
     [
         "5449016a4bdc2d6f028b456f", // Rubles
@@ -76,6 +77,25 @@ public class Main(
 
         var applied = new List<string>(8);
 
+        try
+        {
+            ApplyTweaks(globals, items, applied);
+        }
+        catch (Exception ex)
+        {
+            logger.Error("[Speedloader]: aborted while applying tweaks, tables may be partially modified.", ex);
+        }
+
+        if (applied.Count > 0)
+        {
+            logger.Info($"[Speedloader]: {string.Join(", ", applied)}");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void ApplyTweaks(GlobalConfig globals, Dictionary<MongoId, TemplateItem> items, List<string> applied)
+    {
         if (GetConfig("GrowthTweaks", "Enabled", false))
         {
             var mult = GetConfig("GrowthTweaks", "Multiplier", 2.5);
@@ -139,10 +159,9 @@ public class Main(
             {
                 foreach (var item in items.Values)
                 {
-                    // Compare MongoId structs directly; ToString() here would allocate once per item
-                    if (item.Parent == m_ammoParentId && item.Properties is { } properties)
+                    if (item.Parent == m_ammoParentId && item.Properties is { } properties && properties.StackMaxSize is int maxStack)
                     {
-                        properties.StackMaxSize *= stackMult;
+                        properties.StackMaxSize = (int)Math.Min(int.MaxValue, (long)maxStack * stackMult);
                     }
                 }
             }
@@ -152,7 +171,7 @@ public class Main(
 
         if (GetConfig("RaidTweaks", "Enabled", true))
         {
-            var raidMinutes = GetConfig("RaidTweaks", "RaidTimeMinutes", 120);
+            var raidMinutes = Math.Max(1, GetConfig("RaidTweaks", "RaidTimeMinutes", 120));
 
             foreach (var location in locationTable.GetDictionary().Values)
             {
@@ -161,7 +180,7 @@ public class Main(
                     continue;
                 }
 
-                raidBase.ExitAccessTime = raidMinutes;
+                // exit_access_time is unused by the client and is therefore never written
                 raidBase.EscapeTimeLimit = raidMinutes;
                 raidBase.EscapeTimeLimitCoop = raidMinutes;
                 raidBase.EscapeTimeLimitPVE = raidMinutes;
@@ -198,7 +217,7 @@ public class Main(
             }
             else
             {
-                var currencies = new ReadOnlySpan<MongoId>(m_currencyItemIds);
+                var currencies = m_currencyItemIds.AsSpan();
                 var matched = 0;
 
                 foreach (var restriction in globals.RestrictionsInRaid)
@@ -248,13 +267,15 @@ public class Main(
             && items.TryGetValue(m_propitalItemId, out var propital)
             && propital.Properties is { } propitalProperties)
         {
-            var uses = GetConfig("PropitalTweaks", "Uses", 9);
-            var effectSeconds = GetConfig("PropitalTweaks", "EffectSeconds", 300d);
+            var uses = Math.Max(1, GetConfig("PropitalTweaks", "Uses", 9));
+            var effectSeconds = Math.Max(30d, GetConfig("PropitalTweaks", "EffectSeconds", 300d));
+            var tailDelay = Math.Max(0d, effectSeconds - 30d);
 
             // Charges: a zero hpResourceRate makes each use cost exactly one charge instead of hp
             propitalProperties.MaxHpResource = uses;
             propitalProperties.HpResourceRate = 0;
 
+            // Cost 0 keeps every use at one charge; a non-zero cost is deducted per effect
             propitalProperties.EffectsDamage ??= new Dictionary<DamageEffectType, EffectsDamageProperties>();
             propitalProperties.EffectsDamage[DamageEffectType.LightBleeding] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = 0, FadeOut = 0 };
             propitalProperties.EffectsDamage[DamageEffectType.HeavyBleeding] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = 0, FadeOut = 0 };
@@ -262,15 +283,15 @@ public class Main(
             propitalProperties.EffectsDamage[DamageEffectType.Contusion] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = effectSeconds, FadeOut = 0 };
             propitalProperties.EffectsDamage[DamageEffectType.Pain] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = effectSeconds, FadeOut = 5 };
 
-            // Names are client side EStimulatorBuffType members; the tail side effects keep their 30s length
+            // BuffType strings must match the client's EStimulatorBuffType names
             globals.Health.Effects.Stimulator.Buffs[m_propitalBuffName] =
             [
-                CreateBuff("HealthRate", effectSeconds, 1),
-                CreateBuff("SkillRate", effectSeconds, 20, "Metabolism"),
-                CreateBuff("SkillRate", effectSeconds, 20, "Health"),
-                CreateBuff("SkillRate", effectSeconds, 20, "Vitality"),
-                CreateBuff("HandsTremor", 30, delay: effectSeconds - 30),
-                CreateBuff("QuantumTunnelling", 30, delay: effectSeconds - 30),
+                CreateBuff("HealthRate", effectSeconds, 1, delay: 1),
+                CreateBuff("SkillRate", effectSeconds, 20, "Metabolism", 1),
+                CreateBuff("SkillRate", effectSeconds, 20, "Health", 1),
+                CreateBuff("SkillRate", effectSeconds, 20, "Vitality", 1),
+                CreateBuff("HandsTremor", 30, delay: tailDelay),
+                CreateBuff("QuantumTunnelling", 30, delay: tailDelay),
                 CreateBuff("RemoveAllBloodLosses", effectSeconds),
                 CreateBuff("RemoveNegativeEffects", effectSeconds),
             ];
@@ -291,12 +312,16 @@ public class Main(
             {
                 logger.Warning($"[Speedloader]: ExplosiveBulletTweaks.BulletId '{bulletId}' has no item template, skipped.");
             }
+            else if (explosiveBullet.Parent != m_ammoParentId)
+            {
+                logger.Warning($"[Speedloader]: ExplosiveBulletTweaks.BulletId '{bulletId}' is not an ammo item, skipped.");
+            }
             else
             {
                 bulletProperties.HasGrenaderComponent = true;
                 bulletProperties.ExplosionStrength = 120;
                 bulletProperties.ExplosionType = "smallgrenade_expl";
-                bulletProperties.FuzeArmTimeSec = 0.01f;
+                bulletProperties.FuzeArmTimeSec = 0.01;
                 bulletProperties.MinExplosionDistance = 2;
                 bulletProperties.MaxExplosionDistance = 5;
                 bulletProperties.Contusion = new Vector3(1.5f, 6f, 9f);
@@ -305,19 +330,8 @@ public class Main(
                 applied.Add($"Explosive {explosiveBullet.Name ?? bulletId}");
             }
         }
-
-        if (applied.Count > 0)
-        {
-            logger.Info($"[Speedloader]: {string.Join(", ", applied)}");
-        }
-
-        return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Caps every hideout construction, improvement and craft time at <paramref name="cap"/> seconds.
-    /// </summary>
-    /// <returns>Number of times that were actually lowered.</returns>
     private static int CapHideoutTimes(HideoutTable hideoutTable, HideoutConfig hideoutConfig, int cap)
     {
         var capped = 0;
@@ -362,7 +376,13 @@ public class Main(
         }
 
         var cultistCircle = hideoutConfig.CultistCircle;
-        cultistCircle.CraftTimeOverride = cap;
+
+        // -1 means "no override, use craftTimeThresholds"; only replace an absent or larger override
+        if (cultistCircle.CraftTimeOverride < 0 || cultistCircle.CraftTimeOverride > cap)
+        {
+            cultistCircle.CraftTimeOverride = cap;
+            capped++;
+        }
 
         if (cultistCircle.DirectRewards is { } directRewards)
         {
@@ -379,7 +399,7 @@ public class Main(
         return capped;
     }
 
-    private static int CapArea(HideoutArea area, double cap)
+    private static int CapArea(HideoutArea area, int cap)
     {
         if (area.Stages is null)
         {
@@ -416,13 +436,24 @@ public class Main(
 
     private T GetConfig<T>(string section, string key, T fallback) where T : struct
     {
-        if (config is null || config[section] is not JsonObject sectionObject || sectionObject[key] is not JsonValue value
-            || !value.TryGetValue(out T result))
+        if (config is null || config[section] is not JsonObject sectionObject || sectionObject[key] is not JsonValue value)
         {
             return fallback;
         }
 
-        return result;
+        if (value.TryGetValue(out T result))
+        {
+            return result;
+        }
+
+        // JsonValue will not read 120.0 as int, which users do write
+        if (typeof(T) == typeof(int) && value.TryGetValue(out double number) && number % 1 == 0
+            && number is >= int.MinValue and <= int.MaxValue)
+        {
+            return (T)(object)(int)number;
+        }
+
+        return fallback;
     }
 
     private string GetConfig(string section, string key, string fallback)
