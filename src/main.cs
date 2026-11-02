@@ -48,6 +48,7 @@ public class Main(
     private const string m_purseItemId = "5732ee6a24597719ae0c0281";
     private const string m_propitalItemId = "5c0e530286f7747fa1419862";
     private const string m_propitalBuffName = "BuffsPropital";
+    private const string m_defaultExplosiveBulletId = "5fc382b6d6fa9c00c571bbc3"; // .338 TAC-X
 
     private JsonObject? config;
 
@@ -305,6 +306,35 @@ public class Main(
 
             applied.Add($"Propital {uses} uses + all-cure {effectSeconds}s");
         }
+
+        if (GetConfig("ExplosiveBulletTweaks", "Enabled", false))
+        {
+            var bulletId = GetConfig("ExplosiveBulletTweaks", "BulletId", m_defaultExplosiveBulletId);
+
+            if (!bulletId.IsValidMongoId())
+            {
+                logger.Warning($"[Speedloader]: ExplosiveBulletTweaks.BulletId '{bulletId}' is not a valid 24-char item id, skipped.");
+            }
+            else if (!items.TryGetValue(new MongoId(bulletId), out var explosiveBullet)
+                || explosiveBullet.Properties is not { } bulletProperties)
+            {
+                logger.Warning($"[Speedloader]: ExplosiveBulletTweaks.BulletId '{bulletId}' has no item template, skipped.");
+            }
+            else
+            {
+                bulletProperties.HasGrenaderComponent = true;
+                bulletProperties.ExplosionStrength = 120;
+                bulletProperties.ExplosionType = "smallgrenade_expl";
+                bulletProperties.FuzeArmTimeSec = 0.01f;
+                bulletProperties.MinExplosionDistance = 2;
+                bulletProperties.MaxExplosionDistance = 5;
+                bulletProperties.Contusion = new Vector3(1.5f, 6f, 9f);
+                bulletProperties.FragmentsCount = 5;
+                bulletProperties.ShowHitEffectOnExplode = false;
+                applied.Add($"Explosive {explosiveBullet.Name ?? bulletId}");
+            }
+        }
+
         if (applied.Count > 0)
         {
             logger.Info($"[Speedloader]: {string.Join(", ", applied)}");
@@ -317,6 +347,17 @@ public class Main(
     {
         if (config is null || config[section] is not JsonObject sectionObject || sectionObject[key] is not JsonValue value
             || !value.TryGetValue(out T result))
+        {
+            return fallback;
+        }
+
+        return result;
+    }
+
+    private string GetConfig(string section, string key, string fallback)
+    {
+        if (config is null || config[section] is not JsonObject sectionObject || sectionObject[key] is not JsonValue value
+            || !value.TryGetValue(out string? result) || string.IsNullOrWhiteSpace(result))
         {
             return fallback;
         }

@@ -29,5 +29,9 @@
     "Enabled": false,
     "Uses": 9,
     "EffectSeconds": 300
+  },
+  "ExplosiveBulletTweaks": {
+    "Enabled": false,
+    "BulletId": "5fc382b6d6fa9c00c571bbc3"
   }
 }
