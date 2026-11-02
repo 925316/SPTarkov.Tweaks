@@ -12,6 +12,7 @@ using SPTarkov.Server.Core.Models.Spt.Mod;
 using SPTarkov.Server.Core.Models.Spt.Tables;
 using System.Reflection;
 using System.Text.Json.Nodes;
+using DamageEffectType = SPTarkov.Server.Core.Models.Enums.DamageEffectType;
 
 namespace Speedloader;
 
@@ -45,6 +46,8 @@ public class Main(
     private const string m_ammoParentId = "5485a8684bdc2da71d8b4567";
     private const string m_rublesItemId = "5449016a4bdc2d6f028b456f";
     private const string m_purseItemId = "5732ee6a24597719ae0c0281";
+    private const string m_propitalItemId = "5c0e530286f7747fa1419862";
+    private const string m_propitalBuffName = "BuffsPropital";
 
     private JsonObject? config;
 
@@ -174,7 +177,7 @@ public class Main(
             applied.Add($"Secure containers {containerCount}x {containerWeightKg}kg");
         }
 
-        if (GetConfig("MoneyTweaks", "Enabled", true))
+        if (GetConfig("MoneyTweaks", "Enabled", false))
         {
             var maxLobby = GetConfig("MoneyTweaks", "MaxInLobby", 1000000);
             var rublesId = new MongoId(m_rublesItemId);
@@ -196,7 +199,7 @@ public class Main(
             }
         }
 
-        if (GetConfig("HideoutTweaks", "Enabled", true))
+        if (GetConfig("HideoutTweaks", "Enabled", false))
         {
             var opSeconds = GetConfig("HideoutTweaks", "OperationTimeSeconds", 3);
 
@@ -269,6 +272,39 @@ public class Main(
             }
         }
 
+        if (GetConfig("PropitalTweaks", "Enabled", false)
+            && items.TryGetValue(new MongoId(m_propitalItemId), out var propital)
+            && propital.Properties is { } propitalProps)
+        {
+            var uses = GetConfig("PropitalTweaks", "Uses", 9);
+            var effectSeconds = GetConfig("PropitalTweaks", "EffectSeconds", 300d);
+
+            // Charges: a zero hpResourceRate makes each use cost exactly one charge instead of hp
+            propitalProps.MaxHpResource = uses;
+            propitalProps.HpResourceRate = 0;
+
+            propitalProps.EffectsDamage ??= new Dictionary<DamageEffectType, EffectsDamageProperties>();
+            propitalProps.EffectsDamage[DamageEffectType.LightBleeding] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = 0, FadeOut = 0 };
+            propitalProps.EffectsDamage[DamageEffectType.HeavyBleeding] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = 0, FadeOut = 0 };
+            propitalProps.EffectsDamage[DamageEffectType.Fracture] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = 0, FadeOut = 0 };
+            propitalProps.EffectsDamage[DamageEffectType.Contusion] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = effectSeconds, FadeOut = 0 };
+            propitalProps.EffectsDamage[DamageEffectType.Pain] = new EffectsDamageProperties { Cost = 0, Delay = 0, Duration = effectSeconds, FadeOut = 5 };
+
+            // Names are client side EStimulatorBuffType members; the tail side effects keep their 30s length
+            globals.Health.Effects.Stimulator.Buffs[m_propitalBuffName] =
+            [
+                CreateBuff("HealthRate", effectSeconds, 1),
+                CreateBuff("SkillRate", effectSeconds, 20, "Metabolism"),
+                CreateBuff("SkillRate", effectSeconds, 20, "Health"),
+                CreateBuff("SkillRate", effectSeconds, 20, "Vitality"),
+                CreateBuff("HandsTremor", 30, delay: effectSeconds - 30),
+                CreateBuff("QuantumTunnelling", 30, delay: effectSeconds - 30),
+                CreateBuff("RemoveAllBloodLosses", effectSeconds),
+                CreateBuff("RemoveNegativeEffects", effectSeconds),
+            ];
+
+            applied.Add($"Propital {uses} uses + all-cure {effectSeconds}s");
+        }
         if (applied.Count > 0)
         {
             logger.Info($"[Speedloader]: {string.Join(", ", applied)}");
@@ -286,5 +322,19 @@ public class Main(
         }
 
         return result;
+    }
+
+    private static Buff CreateBuff(string buffType, double duration, double value = 0, string skillName = "", double delay = 0)
+    {
+        return new Buff
+        {
+            BuffType = buffType,
+            Chance = 1,
+            Delay = delay,
+            Duration = duration,
+            Value = value,
+            AbsoluteValue = true,
+            SkillName = skillName,
+        };
     }
 }

@@ -24,5 +24,10 @@
   "HideoutTweaks": {
     "Enabled": false,
     "OperationTimeSeconds": 3
+  },
+  "PropitalTweaks": {
+    "Enabled": false,
+    "Uses": 9,
+    "EffectSeconds": 300
   }
 }
