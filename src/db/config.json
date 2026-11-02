@@ -13,16 +13,16 @@
     "BaseUnLoadTime": 0.05,
     "AmmoStackMultiplier": 6
   },
-  "ArmBandTweaks": {
+  "SecuredContainerTweaks": {
     "Enabled": false,
     "WeightKg": -100
   },
   "MoneyTweaks": {
-    "Enabled": true,
+    "Enabled": false,
     "MaxInLobby": 1000000
   },
   "HideoutTweaks": {
-    "Enabled": true,
+    "Enabled": false,
     "OperationTimeSeconds": 3
   }
 }

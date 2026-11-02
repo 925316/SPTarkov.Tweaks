@@ -43,8 +43,8 @@ public class Main(
     : IOnLoad
 {
     private const string m_ammoParentId = "5485a8684bdc2da71d8b4567";
-    private const string m_armBandParentId = "5b3f15d486f77432d0509248";
     private const string m_rublesItemId = "5449016a4bdc2d6f028b456f";
+    private const string m_purseItemId = "5732ee6a24597719ae0c0281";
 
     private JsonObject? config;
 
@@ -156,22 +156,22 @@ public class Main(
             applied.Add($"Raid {raidMinutes}min");
         }
 
-        if (GetConfig("ArmBandTweaks", "Enabled", false))
+        if (GetConfig("SecuredContainerTweaks", "Enabled", false))
         {
-            var weightKg = GetConfig("ArmBandTweaks", "WeightKg", -100);
-            var armbandCount = 0;
+            var containerWeightKg = GetConfig("SecuredContainerTweaks", "WeightKg", -100.0);
+            var containerCount = 0;
 
             foreach (var kvp in items)
             {
-                var item = kvp.Value;
-                if (item.Parent.ToString() == m_armBandParentId && item.Properties != null)
+                var container = kvp.Value;
+                if (container.Properties is { IsSecured: true } && kvp.Key.ToString() != m_purseItemId)
                 {
-                    item.Properties.Weight = weightKg;
-                    armbandCount++;
+                    container.Properties.Weight = containerWeightKg;
+                    containerCount++;
                 }
             }
 
-            applied.Add($"Armband {armbandCount}x {weightKg}kg");
+            applied.Add($"Secure containers {containerCount}x {containerWeightKg}kg");
         }
 
         if (GetConfig("MoneyTweaks", "Enabled", true))
